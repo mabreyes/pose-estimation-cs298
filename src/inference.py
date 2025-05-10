@@ -3,7 +3,10 @@
 Violence detection inference script for MMPose JSON files.
 
 This script uses a trained Graph Neural Network model to predict violence
-scores from human pose data in MMPose JSON format.
+scores from human pose data in MMPose JSON format. It provides:
+- Command-line interface for batch processing
+- Score interpretation based on configurable thresholds
+- Detailed per-frame analytics and overall statistics
 """
 from __future__ import annotations
 
@@ -18,12 +21,50 @@ from torch_geometric.data import Data
 
 # Import from separate component files
 from gnn import create_pose_graph
-from train import ViolenceDetectionGNN, get_device
+from model import ViolenceDetectionGNN, get_device
+
+# Constants for inference
+DEFAULT_MODEL_PATH = "violence_detection_model.pt"
+DEFAULT_OUTPUT_PATH = "violence_scores.json"
+THRESHOLD_MARGIN = 0.2  # Margin for interpretation confidence levels
+MODEL_IN_CHANNELS = 2
+MODEL_HIDDEN_CHANNELS = 64
+MODEL_TRANSFORMER_HEADS = 4
+MODEL_TRANSFORMER_LAYERS = 2
+
+
+def interpret_score(score: float, threshold: float) -> Tuple[str, bool]:
+    """
+    Interpret a violence score based on the threshold.
+
+    Categorizes scores into confidence levels based on their distance from
+    the classification threshold, using the defined THRESHOLD_MARGIN.
+
+    Args:
+        score: Violence score between 0 and 1
+        threshold: Classification threshold
+
+    Returns:
+        Tuple of (interpretation string, is_violent boolean)
+    """
+    is_violent = score >= threshold
+
+    if score < threshold - THRESHOLD_MARGIN:
+        return "Likely non-violent", is_violent
+    elif score < threshold:
+        return "Possibly non-violent", is_violent
+    elif score < threshold + THRESHOLD_MARGIN:
+        return "Possibly violent", is_violent
+    else:
+        return "Likely violent", is_violent
 
 
 def load_and_process_json(json_file: Path) -> List[Tuple[int, List[Data]]]:
     """
     Load and process a single MMPose JSON file for inference.
+
+    Extracts pose keypoints from the MMPose JSON format and converts them
+    to graph representations suitable for GNN processing.
 
     Args:
         json_file: Path to the JSON file
@@ -65,6 +106,9 @@ def predict_violence(
     """
     Predict violence scores for graphs.
 
+    Runs each pose graph through the model to generate a violence score,
+    handling batch creation for single-graph inference.
+
     Args:
         model: Trained GNN model
         graphs: List of graph data objects
@@ -94,13 +138,21 @@ def predict_violence(
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse command line arguments for the inference script."""
+    """
+    Parse command line arguments for the inference script.
+
+    Defines and processes command-line arguments for model path, input file,
+    output file, classification threshold, and metrics display options.
+
+    Returns:
+        Parsed command-line arguments
+    """
     parser = argparse.ArgumentParser(description="Violence Detection from MMPose JSON")
     parser.add_argument(
         "--model_path",
         type=str,
-        default="violence_detection_model.pt",
-        help="Path to trained model",
+        default=DEFAULT_MODEL_PATH,
+        help=f"Path to trained model (default: {DEFAULT_MODEL_PATH})",
     )
     parser.add_argument(
         "--input_file", type=str, required=True, help="Path to input MMPose JSON file"
@@ -108,8 +160,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--output_file",
         type=str,
-        default="violence_scores.json",
-        help="Path to output JSON file",
+        default=DEFAULT_OUTPUT_PATH,
+        help=f"Path to output JSON file (default: {DEFAULT_OUTPUT_PATH})",
     )
     parser.add_argument(
         "--threshold",
@@ -131,6 +183,9 @@ def load_model_and_threshold(
     """
     Load the model and threshold from a saved model file.
 
+    Handles both legacy model format (weights only) and newer format
+    with state dict, threshold, and metrics information.
+
     Args:
         model_path: Path to the saved model file
         device: Device to load the model to
@@ -140,51 +195,41 @@ def load_model_and_threshold(
     """
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
-    in_channels = 2
+    # Create model with standard parameters
     model = ViolenceDetectionGNN(
-        in_channels=in_channels,
-        hidden_channels=64,
-        transformer_heads=4,
-        transformer_layers=2,
+        in_channels=MODEL_IN_CHANNELS,
+        hidden_channels=MODEL_HIDDEN_CHANNELS,
+        transformer_heads=MODEL_TRANSFORMER_HEADS,
+        transformer_layers=MODEL_TRANSFORMER_LAYERS,
     ).to(device)
+
+    # Default threshold if not found in model
+    DEFAULT_THRESHOLD = 0.5
 
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         model.load_state_dict(checkpoint["model_state_dict"])
-        threshold = checkpoint.get("threshold", 0.5)
+        threshold = checkpoint.get("threshold", DEFAULT_THRESHOLD)
         metrics = checkpoint.get("metrics", None)
     else:
         model.load_state_dict(checkpoint)
-        threshold = 0.5
+        threshold = DEFAULT_THRESHOLD
         metrics = None
 
     return model, threshold, metrics
 
 
-def interpret_score(score: float, threshold: float) -> Tuple[str, bool]:
-    """
-    Interpret a violence score based on the threshold.
-
-    Args:
-        score: Violence score between 0 and 1
-        threshold: Classification threshold
-
-    Returns:
-        Tuple of (interpretation string, is_violent boolean)
-    """
-    is_violent = score >= threshold
-
-    if score < threshold - 0.2:
-        return "Likely non-violent", is_violent
-    elif score < threshold:
-        return "Possibly non-violent", is_violent
-    elif score < threshold + 0.2:
-        return "Possibly violent", is_violent
-    else:
-        return "Likely violent", is_violent
-
-
 def main() -> None:
-    """Main inference function to detect violence from pose data."""
+    """
+    Main inference function to detect violence from pose data.
+
+    This function orchestrates the entire inference process:
+    1. Parses command-line arguments
+    2. Loads the model and threshold
+    3. Processes pose data from input file
+    4. Generates predictions for each frame
+    5. Calculates overall statistics
+    6. Saves results to output file
+    """
     args = parse_arguments()
 
     input_file = Path(args.input_file)
@@ -202,10 +247,8 @@ def main() -> None:
     print(f"Model loaded from {model_path}")
 
     threshold = args.threshold if args.threshold is not None else model_threshold
-    print(
-        f"Using classification threshold: {threshold}"
-        + (" (from model)" if args.threshold is None else " (user-specified)")
-    )
+    source_text = " (from model)" if args.threshold is None else " (user-specified)"
+    print(f"Using classification threshold: {threshold}{source_text}")
 
     if args.show_metrics and metrics:
         print("\nModel threshold metrics:")
@@ -245,7 +288,13 @@ def main() -> None:
         overall_score, threshold
     )
 
-    violent_percentage = (violent_frame_count / len(results)) * 100 if results else 0
+    total_frames = len(results)
+    violent_percentage = (
+        (violent_frame_count / total_frames) * 100 if total_frames else 0
+    )
+
+    violent_stat = f"{violent_frame_count}/{total_frames} ({violent_percentage:.2f}%)"
+    print(f"Violent frames: {violent_stat}")
 
     output_data = {
         "file_name": str(input_file.name),
@@ -263,9 +312,6 @@ def main() -> None:
     print(f"Results saved to {output_file}")
     print(f"Overall violence score: {overall_score}")
     print(f"Interpretation: {overall_interpretation}")
-    print(
-        f"Violent frames: {violent_frame_count}/{len(results)} ({violent_percentage}%)"
-    )
 
 
 if __name__ == "__main__":

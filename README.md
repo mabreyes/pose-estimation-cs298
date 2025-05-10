@@ -1,4 +1,4 @@
-# Violence Detection using Pose Graph Neural Networks
+# 🔍 Violence Detection using Pose Estimation + Graph Neural Networks + Transformers
 
 ![sample image](docs/img/1.gif)
 
@@ -145,34 +145,38 @@ flowchart TD
     JK@{ shape: rect}
 ```
 
+## 🌟 Overview
+
 This project detects violent behavior in videos by analyzing human pose data using Graph Neural Networks (GNNs). The system converts pose keypoints from MMPose into graph structures, then processes them through a GNN to predict a violence score between 0 and 1.
 
-## Table of Contents
+## 📋 Table of Contents
 
-- [Features](#features)
-- [Installation](#installation)
-- [Dataset Structure](#dataset-structure)
-- [Workflow Overview](#workflow-overview)
-- [Using the Makefile](#using-the-makefile)
-- [Detailed Usage](#detailed-usage)
-  - [Video Processing](#video-processing)
-  - [Training the Model](#training-the-model)
-  - [Making Predictions](#making-predictions)
-- [Model Architecture](#model-architecture)
-- [Performance](#performance)
-- [License](#license)
+- [🌟 Overview](#-overview)
+- [✨ Features](#-features)
+- [🚀 Installation](#-installation)
+- [📂 Project Structure](#-project-structure)
+- [📊 Dataset Structure](#-dataset-structure)
+- [🔄 Workflow Overview](#-workflow-overview)
+- [🛠️ Using the Makefile](#️-using-the-makefile)
+- [📝 Detailed Usage](#-detailed-usage)
+  - [🎬 Video Processing](#-video-processing)
+  - [🧮 Training the Model](#-training-the-model)
+  - [🔮 Making Predictions](#-making-predictions)
+- [🧠 Model Architecture](#-model-architecture)
+- [📈 Performance](#-performance)
+- [⚖️ License](#️-license)
 
-## Features
+## ✨ Features
 
-- Process MMPose JSON files containing human pose estimation data
-- Convert pose data into graph structures for deep learning analysis
-- Apply Graph Neural Networks to analyze spatial and temporal pose interactions
-- Predict violence scores on a scale from 0 to 1
-- Visualize training metrics and model performance
-- Hardware acceleration support (CUDA for NVIDIA GPUs, MPS for Apple Silicon)
-- Makefile-based workflow for streamlined operation
+- 📹 Process MMPose JSON files containing human pose estimation data
+- 🔗 Convert pose data into graph structures for deep learning analysis
+- 🧠 Apply Graph Neural Networks to analyze spatial and temporal pose interactions
+- 🔢 Predict violence scores on a scale from 0 to 1
+- 📊 Visualize training metrics and model performance
+- 🚀 Hardware acceleration support (CUDA for NVIDIA GPUs, MPS for Apple Silicon)
+- ⚡ Makefile-based workflow for streamlined operation
 
-## Installation
+## 🚀 Installation
 
 1. Clone the repository:
 
@@ -193,7 +197,29 @@ This project detects violent behavior in videos by analyzing human pose data usi
    make help
    ```
 
-## Dataset Structure
+## 📂 Project Structure
+
+The project is organized as follows:
+
+```
+violence-detection/
+├── src/                  # Source code directory
+│   ├── gnn.py            # GNN component and graph creation utilities
+│   ├── model.py          # Main model architecture
+│   ├── transformer.py    # Transformer component for sequential processing
+│   ├── train.py          # Training script
+│   ├── inference.py      # Inference script
+│   └── visualization.py  # Visualization utilities
+├── docs/                 # Documentation
+├── Makefile              # Build automation
+├── run.sh                # Execution script
+├── requirements.txt      # Project dependencies
+└── README.md             # Project documentation
+```
+
+## 📊 Dataset Structure
+
+**[📥 Request access to the dataset here](https://drive.google.com/drive/folders/1pkgOyUq1TiGuFDHsPM9SJ2RAL5ip-1yZ?usp=share_link)**
 
 Organize your dataset as follows:
 
@@ -217,15 +243,15 @@ Organize your dataset as follows:
 
 The JSON files should contain pose keypoints in the MMPose format, with skeleton information for each person detected in each frame.
 
-## Workflow Overview
+## 🔄 Workflow Overview
 
 The violence detection pipeline consists of three main stages:
 
-1. **Video Processing**: Extract pose data from videos using a pose estimation system (MMPose)
-2. **Model Training**: Train a Graph Neural Network on the extracted pose data
-3. **Inference**: Apply the trained model to new videos to predict violence scores
+1. **🎬 Video Processing**: Extract pose data from videos using a pose estimation system (MMPose)
+2. **🧮 Model Training**: Train a Graph Neural Network on the extracted pose data
+3. **🔮 Inference**: Apply the trained model to new videos to predict violence scores
 
-### Complete Workflow
+### 🔄 Complete Workflow
 
 Here's how to execute the complete pipeline:
 
@@ -246,11 +272,11 @@ You can also run the entire pipeline with a single command:
 make all
 ```
 
-## Using the Makefile
+## 🛠️ Using the Makefile
 
 The project includes a Makefile that simplifies the entire workflow.
 
-### Key Make Commands
+### 🔑 Key Make Commands
 
 | Command | Description |
 |---------|-------------|
@@ -262,7 +288,7 @@ The project includes a Makefile that simplifies the entire workflow.
 | `make clean` | Remove generated model and results files |
 | `make help` | Display all available commands |
 
-### Examples
+### 📋 Examples
 
 **Quick Training and Testing:**
 
@@ -283,9 +309,9 @@ make train NUM_EPOCHS=100 BATCH_SIZE=16
 make process-all-json INPUT_DIR=/path/to/json/files OUTPUT_DIR=./results
 ```
 
-## Detailed Usage
+## 📝 Detailed Usage
 
-### Video Processing
+### 🎬 Video Processing
 
 Before training, you need to extract pose data from video files. The Makefile simplifies this:
 
@@ -310,9 +336,9 @@ for file in $(VIOLENT_VIDEO_DIR)/*.mp4; do
 done
 ```
 
-### Training the Model
+### 🧮 Training the Model
 
-#### Basic Training
+#### 🔰 Basic Training
 
 ```bash
 python violence_detection_model.py
@@ -324,7 +350,7 @@ Or use the Makefile:
 make train
 ```
 
-#### Configuration Options
+#### ⚙️ Configuration Options
 
 You can adjust these parameters in `violence_detection_model.py`:
 
@@ -344,7 +370,7 @@ Or override them directly with the Makefile:
 make train NUM_EPOCHS=100 BATCH_SIZE=16
 ```
 
-#### Training Process
+#### 🔄 Training Process
 
 The training script:
 
@@ -355,9 +381,9 @@ The training script:
 5. Saves the model to `violence_detection_model.pt`
 6. Generates training metrics visualization in `training_metrics.png`
 
-### Making Predictions
+### 🔮 Making Predictions
 
-#### Basic Inference
+#### 🔰 Basic Inference
 
 ```bash
 python inference.py --input_file /path/to/results.json
@@ -369,13 +395,13 @@ Or use the Makefile:
 make inference INPUT_FILE=/path/to/results.json
 ```
 
-#### Command-line Arguments
+#### 🔤 Command-line Arguments
 
 - `--input_file`: Path to the MMPose JSON file (required)
 - `--output_file`: Path for output results (default: `violence_scores.json`)
 - `--model_path`: Path to the trained model (default: `violence_detection_model.pt`)
 
-#### Inference Output
+#### 📤 Inference Output
 
 The output JSON file will have this structure:
 
@@ -394,36 +420,36 @@ The output JSON file will have this structure:
 }
 ```
 
-#### Score Interpretation
+#### 📊 Score Interpretation
 
-- Below 0.3: "Likely non-violent"
-- Between 0.3 and 0.7: "Ambiguous or moderate activity"
-- Above 0.7: "Likely violent"
+- 🟢 Below 0.3: "Likely non-violent"
+- 🟠 Between 0.3 and 0.7: "Ambiguous or moderate activity"
+- 🔴 Above 0.7: "Likely violent"
 
-## Model Architecture
+## 🧠 Model Architecture
 
 The violence detection model uses a multi-component architecture:
 
-1. **Graph Neural Network (GNN) Component**:
+1. **📊 Graph Neural Network (GNN) Component**:
    - Processes pose keypoints as graph structures
    - Uses Graph Convolutional Network (GCN) layers to analyze spatial relationships
    - Converts raw pose data into meaningful embeddings
 
-2. **Transformer Component**:
+2. **🔄 Transformer Component**:
    - Takes embeddings from the GNN
    - Applies self-attention to capture contextual relationships
    - Enhances feature representation through attention mechanisms
 
-3. **Classification Component**:
+3. **🎯 Classification Component**:
    - Takes transformer outputs and applies fully connected layers
    - Uses dropout regularization to prevent overfitting
    - Produces final violence score on a scale from 0 to 1
 
 This pipeline architecture (pose keypoints → GNN → Transformer → classification) allows the model to:
 
-- Analyze the spatial relationships between body parts via the GNN
-- Capture temporal and contextual patterns via the Transformer
-- Make more robust predictions by combining multiple deep learning techniques
+- 🔗 Analyze the spatial relationships between body parts via the GNN
+- 🕰️ Capture temporal and contextual patterns via the Transformer
+- 🎯 Make more robust predictions by combining multiple deep learning techniques
 
 The code is modularly organized into separate files:
 
@@ -431,20 +457,20 @@ The code is modularly organized into separate files:
 - `transformer.py`: Contains the Transformer component
 - `violence_detection_model.py`: Main file that combines all components
 
-## Performance
+## 📈 Performance
 
 On our test dataset, the model achieves:
 
-- High accuracy in identifying violent sequences (scores above 0.98 for violent content)
-- Good generalization across different camera angles
-- Real-time inference capability
+- ✅ High accuracy in identifying violent sequences (scores above 0.98 for violent content)
+- 🌐 Good generalization across different camera angles
+- ⚡ Real-time inference capability
 
 The model's performance is evaluated using:
 
-- Binary cross-entropy loss
-- ROC AUC score for classification performance
-- Training and validation curves to monitor learning progress
+- 📉 Binary cross-entropy loss
+- 📊 ROC AUC score for classification performance
+- 📈 Training and validation curves to monitor learning progress
 
-## License
+## ⚖️ License
 
 This project is licensed under the MIT License - see the LICENSE file for details.

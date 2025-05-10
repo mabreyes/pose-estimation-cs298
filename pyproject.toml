@@ -5,19 +5,60 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "violence-detection"
 version = "0.1.0"
-description = "Violence detection using pose estimation and graph neural networks"
+description = "Violence detection from pose data using Graph Neural Networks"
+authors = [
+    {name = "Marc Reyes", email = "marc.reyes@example.com"}
+]
 readme = "README.md"
-requires-python = ">=3.8"
 license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=1.10.0",
+    "torch-geometric>=2.0.0",
+    "numpy>=1.20.0",
+    "scikit-learn>=1.0.0",
+    "matplotlib>=3.4.0",
+    "tqdm>=4.60.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/violence-detection"
+"Bug Reports" = "https://github.com/yourusername/violence-detection/issues"
+"Source" = "https://github.com/yourusername/violence-detection"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["violence_detection"]
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310"]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 
 [tool.ruff]
-# Allow lines to be as long as 88.
 line-length = 88
-
-# Assume Python 3.8
 target-version = "py38"
-
-# Exclude a variety of commonly ignored directories.
 exclude = [
     ".bzr",
     ".direnv",
@@ -43,23 +84,10 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-# Enable flake8-bugbear (`B`) rules.
-select = [
-    "E",    # pycodestyle errors
-    "F",    # pyflakes
-    "B",    # flake8-bugbear
-    "I",    # isort
-]
+select = ["E", "F", "B", "W", "I"]
+ignore = []
 
-# Ignore specific rules.
-ignore = [
-    "E203",  # Whitespace before ':'
-    "E501",  # Line too long
-]
-
-# Allow unused imports in `__init__.py` files.
-[tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["gnn", "transformer", "visualization"]
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--cov=violence_detection --cov-report=term-missing"
+testpaths = ["tests"]

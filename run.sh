@@ -12,6 +12,7 @@ usage() {
     echo "  --train                   Run in training mode (default)"
     echo "  --infer --input FILE      Run in inference mode with input file"
     echo "  --output FILE             Specify output file for inference (default: inference_results.json)"
+    echo "  --model FILE              Specify model file path for inference (default: violence_detection_model.pt)"
     echo "  --help                    Display this help message"
     exit 1
 }
@@ -20,6 +21,7 @@ usage() {
 MODE="train"
 INPUT_FILE=""
 OUTPUT_FILE="inference_results.json"
+MODEL_FILE="violence_detection_model.pt"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -40,6 +42,10 @@ while [[ $# -gt 0 ]]; do
             OUTPUT_FILE="$2"
             shift 2
             ;;
+        --model)
+            MODEL_FILE="$2"
+            shift 2
+            ;;
         --help)
             usage
             ;;
@@ -56,15 +62,19 @@ if [[ "$MODE" == "infer" && -z "$INPUT_FILE" ]]; then
     usage
 fi
 
+# Update PYTHONPATH to include src directory
+export PYTHONPATH="$PYTHONPATH:$(pwd)"
+
 # Run the appropriate mode
 if [[ "$MODE" == "train" ]]; then
     echo "Running in training mode..."
-    python -W ignore train.py
+    python -W ignore src/train.py
 elif [[ "$MODE" == "infer" ]]; then
     echo "Running in inference mode..."
     echo "Input file: $INPUT_FILE"
     echo "Output file: $OUTPUT_FILE"
-    python -W ignore inference.py --input_file "$INPUT_FILE" --output_file "$OUTPUT_FILE"
+    echo "Model file: $MODEL_FILE"
+    python -W ignore src/inference.py --input_file "$INPUT_FILE" --output_file "$OUTPUT_FILE" --model_path "$MODEL_FILE"
 fi
 
 echo "Model execution completed"

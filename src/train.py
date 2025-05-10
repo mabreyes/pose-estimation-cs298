@@ -3,9 +3,14 @@
 Violence Detection using Graph Neural Networks.
 
 This module implements a GNN model to detect violent behavior from human pose data
-in MMPose JSON format. It includes functionality for graph construction, model
-training, and evaluation.
+in MMPose JSON format. It includes functionality for:
+- Data loading and preprocessing from MMPose JSON format
+- Graph construction from pose keypoints
+- Model training with metrics tracking
+- Model evaluation and optimal threshold selection
+- Result visualization and model persistence
 """
+
 from __future__ import annotations
 
 import json
@@ -14,7 +19,6 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import (
     confusion_matrix,
@@ -31,11 +35,11 @@ from tqdm import tqdm
 import visualization as viz
 
 # Import components from separate files
-from gnn import PoseGNN, create_pose_graph
-from transformer import TransformerEncoder
+from gnn import create_pose_graph
+from model import ViolenceDetectionGNN, get_device
 
 # Configuration constants
-# Use Path objects for better path handling
+# Data paths
 if torch.cuda.is_available():
     # GPU detected paths
     DATA_PATH = Path("./json")
@@ -53,83 +57,90 @@ else:
 
 # Training hyperparameters
 BATCH_SIZE = 32
-NUM_EPOCHS = 50
+NUM_EPOCHS = 2
 LEARNING_RATE = 0.001
-SAMPLE_PERCENTAGE = 100
+SAMPLE_PERCENTAGE = 1  # Percentage of data to use (1-100)
+
+# Model and evaluation constants
+MODEL_HIDDEN_CHANNELS = 64
+MODEL_TRANSFORMER_HEADS = 4
+MODEL_TRANSFORMER_LAYERS = 2
+TEST_SPLIT_RATIO = 0.2
+VALIDATION_SPLIT_RATIO = 0.25
+RANDOM_SEED = 42
 
 
-class ViolenceDetectionGNN(nn.Module):
+def find_optimal_threshold(
+    y_true: np.ndarray, y_score: np.ndarray
+) -> Tuple[float, Dict[str, float]]:
     """
-    Full model architecture for violence detection from pose data.
+    Calculate the optimal classification threshold using multiple methods.
 
-    This model processes pose keypoints using a pipeline of:
-    1. Graph Neural Network to process pose graph structure
-    2. Transformer to capture contextual patterns
-    3. Classifier to produce violence score
+    Implements several threshold optimization techniques:
+    1. Youden's J statistic (maximizing sensitivity + specificity - 1)
+    2. Minimum distance to perfect classifier (0,1) point in ROC space
+    3. Maximum F1 score
+
+    The primary method used is Youden's J statistic, which is widely accepted
+    in the academic literature for binary classification threshold optimization.
+
+    Args:
+        y_true: Ground truth binary labels
+        y_score: Predicted scores (probabilities)
+
+    Returns:
+        Tuple of (optimal threshold, dictionary of metrics at that threshold)
     """
+    fpr, tpr, thresholds = roc_curve(y_true, y_score)
 
-    def __init__(
-        self,
-        in_channels: int,
-        hidden_channels: int = 64,
-        transformer_heads: int = 4,
-        transformer_layers: int = 2,
-    ):
-        """
-        Initialize the full model.
+    # Calculate Youden's J statistic (J = Sensitivity + Specificity - 1)
+    j_scores = tpr - fpr
+    optimal_idx_j = np.argmax(j_scores)
+    optimal_threshold_j = thresholds[optimal_idx_j]
 
-        Args:
-            in_channels: Number of input features per node
-                         (typically 2 for x,y coordinates)
-            hidden_channels: Size of hidden representations
-            transformer_heads: Number of attention heads in transformer
-            transformer_layers: Number of transformer layers
-        """
-        super(ViolenceDetectionGNN, self).__init__()
+    # Calculate distance to (0,1) point in ROC space
+    distances = np.sqrt((1 - tpr) ** 2 + fpr**2)
+    optimal_idx_d = np.argmin(distances)
+    optimal_threshold_d = thresholds[optimal_idx_d]
 
-        # GNN component
-        self.gnn = PoseGNN(in_channels, hidden_channels)
+    # Calculate F1 score at different thresholds
+    precision, recall, pr_thresholds = precision_recall_curve(y_true, y_score)
 
-        # Transformer component
-        self.transformer = TransformerEncoder(
-            input_dim=hidden_channels,
-            num_heads=transformer_heads,
-            num_layers=transformer_layers,
-            output_dim=hidden_channels,
-        )
+    # Calculate F1 for all possible thresholds
+    f1_scores = []
+    for t in thresholds:
+        y_pred = (y_score >= t).astype(int)
+        f1 = f1_score(y_true, y_pred)
+        f1_scores.append(f1)
 
-        # Final prediction layers
-        self.lin1 = nn.Linear(hidden_channels, hidden_channels // 2)
-        self.lin2 = nn.Linear(hidden_channels // 2, 1)
+    optimal_idx_f1 = np.argmax(f1_scores)
+    optimal_threshold_f1 = thresholds[optimal_idx_f1]
 
-    def forward(
-        self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Forward pass through the full model.
+    # Choose Youden's J as the primary method (most common in academic literature)
+    optimal_threshold = optimal_threshold_j
 
-        Args:
-            x: Node features [num_nodes, in_channels]
-            edge_index: Graph connectivity [2, num_edges]
-            batch: Batch assignment for nodes [num_nodes]
+    # Calculate confusion matrix at optimal threshold
+    y_pred = (y_score >= optimal_threshold).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
 
-        Returns:
-            Violence score between 0 and 1 [batch_size, 1]
-        """
-        # Process through GNN to get graph embeddings
-        x = self.gnn(x, edge_index, batch)
+    # Calculate various metrics at the optimal threshold
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    precision_val = tp / (tp + fp) if (tp + fp) > 0 else 0
 
-        # Process through transformer to capture contextual patterns
-        x = self.transformer(x)
+    # Create metrics dictionary
+    metrics = {
+        "threshold_j": optimal_threshold_j,
+        "threshold_distance": optimal_threshold_d,
+        "threshold_f1": optimal_threshold_f1,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "precision": precision_val,
+        "f1_score": f1_scores[optimal_idx_j],
+        "youdens_j": j_scores[optimal_idx_j],
+    }
 
-        # Final predictions
-        x = self.lin1(x)
-        x = F.relu(x)
-        x = F.dropout(x, p=0.3, training=self.training)
-        x = self.lin2(x)
-
-        # Output violence score between 0 and 1
-        return torch.sigmoid(x)
+    return optimal_threshold, metrics
 
 
 def load_mmpose_data(
@@ -137,6 +148,11 @@ def load_mmpose_data(
 ) -> Tuple[List[Data], List[float]]:
     """
     Load MMPose JSON files and convert them to graph data.
+
+    Processes JSON files containing pose keypoints from both violent and non-violent
+    video frames. Each person instance in a frame is converted to a graph representation
+    suitable for GNN processing. The function supports processing a subset of the data
+    using the sample_percentage parameter.
 
     Args:
         violent_path: Path to violent pose JSON files
@@ -239,6 +255,10 @@ def train_model(
     """
     Train the GNN model and track metrics.
 
+    Implements a training loop with both training and validation phases.
+    For each epoch, the model is trained on the training set and evaluated
+    on the validation set. Metrics including loss and AUC are tracked.
+
     Args:
         model: The GNN model
         train_loader: Training data loader
@@ -261,7 +281,7 @@ def train_model(
 
         # Process batches
         for batch in tqdm(
-            train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training"
+            train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} - Training"
         ):
             batch = batch.to(device)
             optimizer.zero_grad()
@@ -291,7 +311,7 @@ def train_model(
 
         with torch.no_grad():
             for batch in tqdm(
-                val_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Validation"
+                val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} - Validation"
             ):
                 batch = batch.to(device)
 
@@ -315,7 +335,7 @@ def train_model(
         metrics["val_auc"].append(val_auc)
 
         # Print epoch results
-        print(f"Epoch {epoch+1}/{num_epochs}:")
+        print(f"Epoch {epoch + 1}/{num_epochs}:")
         print(f"  Train Loss: {avg_train_loss:.4f}")
         print(f"  Val Loss: {avg_val_loss:.4f}")
         print(f"  Val AUC: {val_auc:.4f}")
@@ -323,91 +343,14 @@ def train_model(
     return metrics
 
 
-def get_device() -> torch.device:
-    """
-    Determine the optimal device for training/inference.
-
-    Returns:
-        torch.device: CUDA if available, MPS if on Apple Silicon, otherwise CPU
-    """
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    else:
-        return torch.device("cpu")
-
-
-def find_optimal_threshold(
-    y_true: np.ndarray, y_score: np.ndarray
-) -> Tuple[float, Dict[str, float]]:
-    """
-    Calculate the optimal classification threshold using multiple methods.
-
-    Args:
-        y_true: Ground truth binary labels
-        y_score: Predicted scores (probabilities)
-
-    Returns:
-        Tuple of (optimal threshold, dictionary of metrics at that threshold)
-    """
-    fpr, tpr, thresholds = roc_curve(y_true, y_score)
-
-    # Calculate Youden's J statistic (J = Sensitivity + Specificity - 1)
-    j_scores = tpr - fpr
-    optimal_idx_j = np.argmax(j_scores)
-    optimal_threshold_j = thresholds[optimal_idx_j]
-
-    # Calculate distance to (0,1) point in ROC space
-    distances = np.sqrt((1 - tpr) ** 2 + fpr**2)
-    optimal_idx_d = np.argmin(distances)
-    optimal_threshold_d = thresholds[optimal_idx_d]
-
-    # Calculate F1 score at different thresholds
-    precision, recall, pr_thresholds = precision_recall_curve(y_true, y_score)
-
-    # Calculate F1 for all possible thresholds
-    f1_scores = []
-    for t in thresholds:
-        y_pred = (y_score >= t).astype(int)
-        f1 = f1_score(y_true, y_pred)
-        f1_scores.append(f1)
-
-    optimal_idx_f1 = np.argmax(f1_scores)
-    optimal_threshold_f1 = thresholds[optimal_idx_f1]
-
-    # Choose Youden's J as the primary method (most common in academic literature)
-    optimal_threshold = optimal_threshold_j
-
-    # Calculate confusion matrix at optimal threshold
-    y_pred = (y_score >= optimal_threshold).astype(int)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-
-    # Calculate various metrics at the optimal threshold
-    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-    precision_val = tp / (tp + fp) if (tp + fp) > 0 else 0
-
-    # Create metrics dictionary
-    metrics = {
-        "threshold_j": optimal_threshold_j,
-        "threshold_distance": optimal_threshold_d,
-        "threshold_f1": optimal_threshold_f1,
-        "sensitivity": sensitivity,
-        "specificity": specificity,
-        "precision": precision_val,
-        "f1_score": f1_scores[optimal_idx_j],
-        "youdens_j": j_scores[optimal_idx_j],
-    }
-
-    return optimal_threshold, metrics
-
-
 def evaluate_model(
     model: ViolenceDetectionGNN, test_loader: DataLoader, device: torch.device
 ) -> Tuple[float, float, float, Dict[str, float]]:
     """
     Evaluate the model on the test set.
+
+    Performs a comprehensive evaluation of the trained model on the test set,
+    calculating loss, AUC, and finding the optimal classification threshold.
 
     Args:
         model: The trained GNN model
@@ -450,15 +393,23 @@ def evaluate_model(
 
 
 def main() -> None:
-    """Main function to train and evaluate the violence detection model."""
+    """
+    Main function to train and evaluate the violence detection model.
+
+    This function orchestrates the entire training pipeline:
+    1. Sets up the device and data paths
+    2. Loads and preprocesses data
+    3. Splits data into training, validation, and test sets
+    4. Trains the model
+    5. Evaluates the model and finds optimal classification threshold
+    6. Saves the model and generates visualizations
+    """
     device = get_device()
     print(f"Using device: {device}")
 
     # Check if directories exist
     if not VIOLENT_PATH_CAM1.exists():
-        print(
-            f"Error: Violent data path (cam1) does not exist: " f"{VIOLENT_PATH_CAM1}"
-        )
+        print(f"Error: Violent data path (cam1) does not exist: {VIOLENT_PATH_CAM1}")
         return
 
     if not NON_VIOLENT_PATH_CAM1.exists():
@@ -508,40 +459,51 @@ def main() -> None:
     print(f"Positive (violent) samples: {sum(all_labels)}")
     print(f"Negative (non-violent) samples: {len(all_labels) - sum(all_labels)}")
 
+    # Assign labels to graphs
     for i, graph in enumerate(all_graphs):
         graph.y = torch.tensor([all_labels[i]], dtype=torch.float)
 
+    # Split data into train, validation, and test sets
     train_graphs, test_graphs = train_test_split(
-        all_graphs, test_size=0.2, random_state=42, stratify=all_labels
+        all_graphs,
+        test_size=TEST_SPLIT_RATIO,
+        random_state=RANDOM_SEED,
+        stratify=all_labels,
     )
     train_graphs, val_graphs = train_test_split(
-        train_graphs, test_size=0.25, random_state=42
+        train_graphs, test_size=VALIDATION_SPLIT_RATIO, random_state=RANDOM_SEED
     )
 
     print(f"Training graphs: {len(train_graphs)}")
     print(f"Validation graphs: {len(val_graphs)}")
     print(f"Test graphs: {len(test_graphs)}")
 
+    # Create data loaders
     train_loader = DataLoader(train_graphs, batch_size=BATCH_SIZE, shuffle=True)
     val_loader = DataLoader(val_graphs, batch_size=BATCH_SIZE)
     test_loader = DataLoader(test_graphs, batch_size=BATCH_SIZE)
 
+    # Get input channel dimension from data
     in_channels = train_graphs[0].x.shape[1]
 
+    # Initialize model
     model = ViolenceDetectionGNN(
         in_channels=in_channels,
-        hidden_channels=64,
-        transformer_heads=4,
-        transformer_layers=2,
+        hidden_channels=MODEL_HIDDEN_CHANNELS,
+        transformer_heads=MODEL_TRANSFORMER_HEADS,
+        transformer_layers=MODEL_TRANSFORMER_LAYERS,
     ).to(device)
 
+    # Initialize optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
+    # Train model
     print("Training model...")
     metrics = train_model(
         model, train_loader, val_loader, device, optimizer, num_epochs=NUM_EPOCHS
     )
 
+    # Evaluate model
     avg_test_loss, test_auc, optimal_threshold, threshold_metrics = evaluate_model(
         model, test_loader, device
     )
@@ -552,6 +514,7 @@ def main() -> None:
     for metric, value in threshold_metrics.items():
         print(f"  {metric}: {value:.4f}")
 
+    # Save model
     model_path = Path("violence_detection_model.pt")
     torch.save(
         {

@@ -10,8 +10,8 @@ MODEL_FILE = violence_detection_model.pt
 METRICS_FILE = training_metrics.png
 BATCH_SIZE = 32
 NUM_EPOCHS = 50
-TRAIN_SCRIPT = train.py
-INFERENCE_SCRIPT = inference.py
+TRAIN_SCRIPT = src/train.py
+INFERENCE_SCRIPT = src/inference.py
 RUN_SCRIPT = ./run.sh
 
 # Default target
@@ -28,14 +28,14 @@ $(NONVIOLENT_PROCESSED_DIR):
 process-violent: $(VIOLENT_PROCESSED_DIR)
 	@echo "Processing violent videos to extract pose data..."
 	@echo "Note: You need to define your video processing command here"
-	@echo "Example: for file in $(VIOLENT_VIDEO_DIR)/*.mp4; do python process_video.py --input $$file --output $(VIOLENT_PROCESSED_DIR)/results_$$(basename $$file .mp4).json; done"
+	@echo "Example: for file in $(VIOLENT_VIDEO_DIR)/*.mp4; do python src/process_video.py --input $$file --output $(VIOLENT_PROCESSED_DIR)/results_$$(basename $$file .mp4).json; done"
 	# Add your video processing command here
 
 # Process non-violent videos to extract pose data
 process-nonviolent: $(NONVIOLENT_PROCESSED_DIR)
 	@echo "Processing non-violent videos to extract pose data..."
 	@echo "Note: You need to define your video processing command here"
-	@echo "Example: for file in $(NONVIOLENT_VIDEO_DIR)/*.mp4; do python process_video.py --input $$file --output $(NONVIOLENT_PROCESSED_DIR)/results_$$(basename $$file .mp4).json; done"
+	@echo "Example: for file in $(NONVIOLENT_VIDEO_DIR)/*.mp4; do python src/process_video.py --input $$file --output $(NONVIOLENT_PROCESSED_DIR)/results_$$(basename $$file .mp4).json; done"
 	# Add your video processing command here
 
 # Process all videos
