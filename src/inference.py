@@ -20,7 +20,7 @@ import torch
 from torch_geometric.data import Data
 
 # Import from separate component files
-from gnn import create_pose_graph
+from grnn import create_pose_graph
 from model import ViolenceDetectionGNN, get_device
 
 # Constants for inference

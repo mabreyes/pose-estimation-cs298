@@ -26,7 +26,6 @@ from sklearn.metrics import (
 
 def plot_training_metrics(
     metrics: Dict[str, List[float]],
-    test_metrics: Dict[str, float],
     output_path: Optional[Path] = None,
 ) -> None:
     """
@@ -34,7 +33,6 @@ def plot_training_metrics(
 
     Args:
         metrics: Dictionary containing training metrics history
-        test_metrics: Dictionary containing test metrics
         output_path: Path to save the plot
     """
     plt.figure(figsize=(15, 10))
@@ -52,12 +50,6 @@ def plot_training_metrics(
     # Plot AUC curves
     plt.subplot(2, 2, 2)
     plt.plot(metrics["val_auc"], label="Validation AUC")
-    plt.axhline(
-        y=test_metrics["auc"],
-        color="r",
-        linestyle="--",
-        label=f"Test AUC: {test_metrics['auc']:.4f}",
-    )
     plt.xlabel("Epoch")
     plt.ylabel("AUC")
     plt.legend()
@@ -68,13 +60,6 @@ def plot_training_metrics(
     if "val_f1" in metrics:
         plt.subplot(2, 2, 3)
         plt.plot(metrics["val_f1"], label="Validation F1")
-        if "f1" in test_metrics:
-            plt.axhline(
-                y=test_metrics["f1"],
-                color="r",
-                linestyle="--",
-                label=f"Test F1: {test_metrics['f1']:.4f}",
-            )
         plt.xlabel("Epoch")
         plt.ylabel("F1 Score")
         plt.legend()
@@ -85,13 +70,6 @@ def plot_training_metrics(
     if "val_accuracy" in metrics:
         plt.subplot(2, 2, 4)
         plt.plot(metrics["val_accuracy"], label="Validation Accuracy")
-        if "accuracy" in test_metrics:
-            plt.axhline(
-                y=test_metrics["accuracy"],
-                color="r",
-                linestyle="--",
-                label=f"Test Accuracy: {test_metrics['accuracy']:.4f}",
-            )
         plt.xlabel("Epoch")
         plt.ylabel("Accuracy")
         plt.legend()
@@ -102,7 +80,6 @@ def plot_training_metrics(
 
     if output_path:
         plt.savefig(output_path)
-        print(f"Training metrics plot saved to {output_path}")
     else:
         plt.show()
 

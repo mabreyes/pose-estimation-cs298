@@ -3,20 +3,18 @@
 Violence Detection Model Architecture.
 
 This module defines the main model architecture for violence detection from human pose
-data, combining a Graph Neural Network and Transformer components.
+data, using a Graph Recurrent Neural Network (GRNN) approach.
 It includes:
 - Device detection for optimal hardware utilization
-- ViolenceDetectionGNN model that combines GNN and Transformer processing
+- ViolenceDetectionGRNN model that processes spatio-temporal graph data
 """
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-# Import components from separate files
-from gnn import PoseGNN
-from transformer import TransformerEncoder
+# Import the GRNN component
+from grnn import ViolenceDetectionGRNN
 
 
 def get_device() -> torch.device:
@@ -37,22 +35,17 @@ def get_device() -> torch.device:
         return torch.device("cpu")
 
 
+# Keeping this class for backwards compatibility
 class ViolenceDetectionGNN(nn.Module):
     """
-    Full model architecture for violence detection from pose data.
+    Compatibility wrapper for the new GRNN-based model.
 
-    This model processes pose keypoints using a pipeline of:
-    1. Graph Neural Network to process pose graph structure
-    2. Transformer to capture contextual patterns
-    3. Classifier to produce violence score
+    This class maintains the same interface as the previous GNN+Transformer model
+    but delegates to the new GRNN implementation.
 
-    The architecture combines state-of-the-art GNN and transformer techniques
-    to effectively process spatial relationships in human pose data and
-    classify violent behavior.
+    Note: This is included for backwards compatibility. New code should
+    directly use ViolenceDetectionGRNN.
     """
-
-    # Constants for the model architecture
-    DROPOUT_RATE = 0.3
 
     def __init__(
         self,
@@ -62,41 +55,30 @@ class ViolenceDetectionGNN(nn.Module):
         transformer_layers: int = 2,
     ):
         """
-        Initialize the full model.
+        Initialize the compatibility wrapper.
 
         Args:
             in_channels: Number of input features per node
-                         (typically 2 for x,y coordinates)
             hidden_channels: Size of hidden representations
-            transformer_heads: Number of attention heads in transformer
-            transformer_layers: Number of transformer layers
+            transformer_heads: Ignored (kept for compatibility)
+            transformer_layers: Used as num_layers for GRNN
         """
         super(ViolenceDetectionGNN, self).__init__()
 
-        # GNN component
-        self.gnn = PoseGNN(in_channels, hidden_channels)
-
-        # Transformer component
-        self.transformer = TransformerEncoder(
-            input_dim=hidden_channels,
-            num_heads=transformer_heads,
+        # Create the actual GRNN model
+        self.grnn_model = ViolenceDetectionGRNN(
+            in_channels=in_channels,
+            hidden_channels=hidden_channels,
             num_layers=transformer_layers,
-            output_dim=hidden_channels,
+            dropout=0.3,
+            bidirectional=True,
         )
-
-        # Final prediction layers
-        self.lin1 = nn.Linear(hidden_channels, hidden_channels // 2)
-        self.lin2 = nn.Linear(hidden_channels // 2, 1)
 
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor
     ) -> torch.Tensor:
         """
-        Forward pass through the full model.
-
-        Processes pose data through the GNN to capture spatial relationships,
-        then through the transformer to capture contextual patterns, and finally
-        through classifier layers to produce a violence score.
+        Forward pass - adapts the old interface to the new GRNN model.
 
         Args:
             x: Node features [num_nodes, in_channels]
@@ -106,17 +88,11 @@ class ViolenceDetectionGNN(nn.Module):
         Returns:
             Violence score between 0 and 1 [batch_size, 1]
         """
-        # Process through GNN to get graph embeddings
-        x = self.gnn(x, edge_index, batch)
+        # Reshape x for GRNN (which expects sequence data)
+        batch_size = torch.max(batch).item() + 1
+        # Reshape assuming single time step for compatibility with old interface
+        # For the compatibility layer, we treat the input as a sequence of length 1
+        x_reshaped = x.view(batch_size, 1, -1, x.size(-1))
 
-        # Process through transformer to capture contextual patterns
-        x = self.transformer(x)
-
-        # Final predictions
-        x = self.lin1(x)
-        x = F.relu(x)
-        x = F.dropout(x, p=self.DROPOUT_RATE, training=self.training)
-        x = self.lin2(x)
-
-        # Output violence score between 0 and 1
-        return torch.sigmoid(x)
+        # Process through the GRNN model
+        return self.grnn_model(x_reshaped, edge_index, batch)

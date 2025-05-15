@@ -13,6 +13,7 @@ in MMPose JSON format. It includes functionality for:
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -35,7 +36,7 @@ from tqdm import tqdm
 import visualization as viz
 
 # Import components from separate files
-from gnn import create_pose_graph
+from grnn import create_pose_graph
 from model import ViolenceDetectionGNN, get_device
 
 # Configuration constants
@@ -47,6 +48,13 @@ if torch.cuda.is_available():
     NON_VIOLENT_PATH_CAM1 = DATA_PATH / "non-violent/cam1"
     VIOLENT_PATH_CAM2 = DATA_PATH / "violent/cam2"
     NON_VIOLENT_PATH_CAM2 = DATA_PATH / "non-violent/cam2"
+
+    # Real Life Violence Dataset paths
+    REAL_LIFE_VIOLENCE_PATH = Path("Real_Life_Violence_Dataset/Violence/processed")
+    REAL_LIFE_NONVIOLENCE_PATH = Path(
+        "Real_Life_Violence_Dataset/NonViolence/processed"
+    )
+
 else:
     # Local paths (no GPU)
     DATA_PATH = Path("/Volumes/MARCREYES/violence-detection-dataset")
@@ -55,9 +63,17 @@ else:
     VIOLENT_PATH_CAM2 = DATA_PATH / "violent/cam2/processed"
     NON_VIOLENT_PATH_CAM2 = DATA_PATH / "non-violent/cam2/processed"
 
+    # Real Life Violence Dataset paths
+    REAL_LIFE_VIOLENCE_PATH = Path(
+        "/Volumes/MARCREYES/archive/Real_Life_Violence_Dataset/processed/violent/Real_Life_Violence_Dataset/Violence/processed"
+    )
+    REAL_LIFE_NONVIOLENCE_PATH = Path(
+        "/Volumes/MARCREYES/archive/Real_Life_Violence_Dataset/processed/nonviolent/Real_Life_Violence_Dataset/NonViolence/processed"
+    )
+
 # Training hyperparameters
 BATCH_SIZE = 32
-NUM_EPOCHS = 2
+NUM_EPOCHS = 1
 LEARNING_RATE = 0.001
 SAMPLE_PERCENTAGE = 1  # Percentage of data to use (1-100)
 
@@ -261,8 +277,8 @@ def train_model(
 
     Args:
         model: The GNN model
-        train_loader: Training data loader
-        val_loader: Validation data loader
+        train_loader: Training data loader containing graph objects with .y attributes
+        val_loader: Validation data loader containing graph objects with .y attributes
         device: Device to train on (CPU/GPU/MPS)
         optimizer: Optimizer for training
         num_epochs: Number of training epochs
@@ -278,17 +294,24 @@ def train_model(
         # Training phase
         model.train()
         total_loss = 0
+        total_samples = 0
 
         # Process batches
         for batch in tqdm(
             train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} - Training"
         ):
+            # Move batch to device
             batch = batch.to(device)
+
             optimizer.zero_grad()
 
             # Forward pass
             out = model(batch.x, batch.edge_index, batch.batch)
-            target = batch.y.view(-1, 1).to(device)
+            target = batch.y.to(device)
+
+            # Ensure shapes match for binary_cross_entropy
+            if out.size() != target.size():
+                target = target.view(out.size())
 
             # Calculate loss
             loss = F.binary_cross_entropy(out, target)
@@ -297,15 +320,18 @@ def train_model(
             loss.backward()
             optimizer.step()
 
+            # Track loss
             total_loss += loss.item() * batch.num_graphs
+            total_samples += batch.num_graphs
 
         # Calculate average training loss
-        avg_train_loss = total_loss / len(train_loader.dataset)
+        avg_train_loss = total_loss / total_samples
         metrics["train_loss"].append(avg_train_loss)
 
         # Validation phase
         model.eval()
         val_loss = 0
+        val_samples = 0
         all_preds = []
         all_targets = []
 
@@ -313,22 +339,28 @@ def train_model(
             for batch in tqdm(
                 val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} - Validation"
             ):
+                # Move batch to device
                 batch = batch.to(device)
 
                 # Forward pass
                 out = model(batch.x, batch.edge_index, batch.batch)
-                target = batch.y.view(-1, 1).to(device)
+                target = batch.y.to(device)
+
+                # Ensure shapes match for binary_cross_entropy
+                if out.size() != target.size():
+                    target = target.view(out.size())
 
                 # Calculate loss
                 loss = F.binary_cross_entropy(out, target)
                 val_loss += loss.item() * batch.num_graphs
+                val_samples += batch.num_graphs
 
                 # Store predictions and targets for metrics
-                all_preds.extend(out.cpu().numpy().flatten())
-                all_targets.extend(target.cpu().numpy().flatten())
+                all_preds.extend(out.cpu().numpy())
+                all_targets.extend(target.cpu().numpy())
 
         # Calculate validation metrics
-        avg_val_loss = val_loss / len(val_loader.dataset)
+        avg_val_loss = val_loss / val_samples
         val_auc = roc_auc_score(all_targets, all_preds)
 
         metrics["val_loss"].append(avg_val_loss)
@@ -354,241 +386,269 @@ def evaluate_model(
 
     Args:
         model: The trained GNN model
-        test_loader: Test data loader
+        test_loader: Test data loader containing graph objects with .y attributes
         device: Device for evaluation
 
     Returns:
-        Tuple of (test_loss, test_auc, optimal_threshold, threshold_metrics)
+        Tuple of (auc_score, accuracy_score, optimal_threshold, threshold_metrics)
     """
     model.eval()
     test_loss = 0
+    test_samples = 0
     all_preds = []
     all_targets = []
 
     with torch.no_grad():
         for batch in tqdm(test_loader, desc="Testing"):
+            # Move batch to device
             batch = batch.to(device)
 
             # Forward pass
             out = model(batch.x, batch.edge_index, batch.batch)
-            target = batch.y.view(-1, 1).to(device)
+            target = batch.y.to(device)
+
+            # Ensure shapes match for binary_cross_entropy
+            if out.size() != target.size():
+                target = target.view(out.size())
 
             # Calculate loss
             loss = F.binary_cross_entropy(out, target)
             test_loss += loss.item() * batch.num_graphs
+            test_samples += batch.num_graphs
 
             # Store predictions and targets for metrics
-            all_preds.extend(out.cpu().numpy().flatten())
-            all_targets.extend(target.cpu().numpy().flatten())
+            all_preds.extend(out.cpu().numpy())
+            all_targets.extend(target.cpu().numpy())
 
-    avg_test_loss = test_loss / len(test_loader.dataset)
-    test_auc = roc_auc_score(all_targets, all_preds)
+    # Convert lists to arrays for sklearn metrics
+    all_preds_array = np.array(all_preds)
+    all_targets_array = np.array(all_targets)
+
+    # Calculate AUC
+    test_auc = roc_auc_score(all_targets_array, all_preds_array)
+
+    # Calculate accuracy at default threshold (0.5)
+    y_pred = (all_preds_array >= 0.5).astype(int)
+    accuracy = np.mean((y_pred == all_targets_array).astype(float))
 
     # Find optimal classification threshold
     optimal_threshold, threshold_metrics = find_optimal_threshold(
-        np.array(all_targets), np.array(all_preds)
+        all_targets_array, all_preds_array
     )
 
-    return avg_test_loss, test_auc, optimal_threshold, threshold_metrics
+    return test_auc, accuracy, optimal_threshold, threshold_metrics
+
+
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments for the training script.
+
+    Defines and processes command-line arguments for training configuration,
+    including number of epochs, batch size, and data sampling percentage.
+
+    Returns:
+        Parsed command-line arguments
+    """
+    parser = argparse.ArgumentParser(description="Train Violence Detection GRNN Model")
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=NUM_EPOCHS,
+        help=f"Number of training epochs (default: {NUM_EPOCHS})",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=BATCH_SIZE,
+        help=f"Training batch size (default: {BATCH_SIZE})",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=LEARNING_RATE,
+        help=f"Learning rate (default: {LEARNING_RATE})",
+    )
+    parser.add_argument(
+        "--sample-percentage",
+        type=int,
+        default=SAMPLE_PERCENTAGE,
+        help=f"Percentage of data to use (default: {SAMPLE_PERCENTAGE})",
+    )
+    parser.add_argument(
+        "--hidden-channels",
+        type=int,
+        default=MODEL_HIDDEN_CHANNELS,
+        help=f"Hidden channels in model (default: {MODEL_HIDDEN_CHANNELS})",
+    )
+    parser.add_argument(
+        "--transformer-layers",
+        type=int,
+        default=MODEL_TRANSFORMER_LAYERS,
+        help=f"Transformer layers in model (default: {MODEL_TRANSFORMER_LAYERS})",
+    )
+    parser.add_argument(
+        "--model-output",
+        type=str,
+        default="violence_detection_model.pt",
+        help="Path for saving the model (default: violence_detection_model.pt)",
+    )
+    return parser.parse_args()
 
 
 def main() -> None:
     """
-    Main function to train and evaluate the violence detection model.
+    Main function to execute the training pipeline.
 
-    This function orchestrates the entire training pipeline:
-    1. Sets up the device and data paths
-    2. Loads and preprocesses data
-    3. Splits data into training, validation, and test sets
-    4. Trains the model
-    5. Evaluates the model and finds optimal classification threshold
-    6. Saves the model and generates visualizations
+    This function orchestrates the entire training process:
+    1. Loads and preprocesses data from violent and non-violent samples
+    2. Splits data into training, validation, and test sets
+    3. Creates and trains the GNN model
+    4. Evaluates the model and calculates optimal threshold
+    5. Visualizes training metrics and model performance
+    6. Saves the final model with its threshold information
     """
-    device = get_device()
-    print(f"Using device: {device}")
+    # Parse command line arguments
+    args = parse_arguments()
 
-    # Check if directories exist
-    if not VIOLENT_PATH_CAM1.exists():
-        print(f"Error: Violent data path (cam1) does not exist: {VIOLENT_PATH_CAM1}")
-        return
+    # Apply command line arguments
+    num_epochs = args.epochs
+    batch_size = args.batch_size
+    learning_rate = args.learning_rate
+    sample_percentage = args.sample_percentage
+    hidden_channels = args.hidden_channels
+    transformer_layers = args.transformer_layers
+    model_output_path = args.model_output
 
-    if not NON_VIOLENT_PATH_CAM1.exists():
-        print(
-            f"Error: Non-violent data path (cam1) does not exist: "
-            f"{NON_VIOLENT_PATH_CAM1}"
-        )
-        return
+    print(f"Starting training with {num_epochs} epochs, batch size {batch_size}")
+    print(f"Using {sample_percentage}% of the dataset")
 
+    # Load data from both cameras if available
     all_graphs = []
     all_labels = []
 
-    # Load data from cam1
-    print("Loading and preprocessing data from cam1...")
+    # Camera 1 data (always required)
     try:
+        print("Loading data from Camera 1...")
         graphs_cam1, labels_cam1 = load_mmpose_data(
-            VIOLENT_PATH_CAM1, NON_VIOLENT_PATH_CAM1, SAMPLE_PERCENTAGE
+            VIOLENT_PATH_CAM1, NON_VIOLENT_PATH_CAM1, sample_percentage
         )
         all_graphs.extend(graphs_cam1)
         all_labels.extend(labels_cam1)
-        print(f"Loaded {len(graphs_cam1)} graphs from cam1")
-    except ValueError as e:
-        print(f"Error loading data from cam1: {e}")
+    except Exception as e:
+        print(f"Error loading Camera 1 data: {e}")
+        if not all_graphs:  # If no Camera 1 data and this is the first load attempt
+            raise
 
-    # Check if cam2 data exists and load it
-    cam2_exists = VIOLENT_PATH_CAM2.exists() and NON_VIOLENT_PATH_CAM2.exists()
-
-    if cam2_exists:
-        print("Loading and preprocessing data from cam2...")
-        try:
+    # Camera 2 data (optional)
+    try:
+        if VIOLENT_PATH_CAM2.exists() and NON_VIOLENT_PATH_CAM2.exists():
+            print("Loading data from Camera 2...")
             graphs_cam2, labels_cam2 = load_mmpose_data(
-                VIOLENT_PATH_CAM2, NON_VIOLENT_PATH_CAM2, SAMPLE_PERCENTAGE
+                VIOLENT_PATH_CAM2, NON_VIOLENT_PATH_CAM2, sample_percentage
             )
             all_graphs.extend(graphs_cam2)
             all_labels.extend(labels_cam2)
-            print(f"Loaded {len(graphs_cam2)} graphs from cam2")
-        except ValueError as e:
-            print(f"Error loading data from cam2: {e}")
-    else:
-        print("Cam2 data not found. Using only cam1 data for training.")
+    except Exception as e:
+        print(f"Error loading Camera 2 data: {e}")
+        # Continue with Camera 1 data only
 
-    if not all_graphs:
-        print("No valid graphs were created. Check your data.")
-        return
+    # Real Life Violence Dataset (optional)
+    try:
+        if REAL_LIFE_VIOLENCE_PATH.exists() and REAL_LIFE_NONVIOLENCE_PATH.exists():
+            print("Loading data from Real Life Violence Dataset...")
+            graphs_real_life, labels_real_life = load_mmpose_data(
+                REAL_LIFE_VIOLENCE_PATH, REAL_LIFE_NONVIOLENCE_PATH, sample_percentage
+            )
+            all_graphs.extend(graphs_real_life)
+            all_labels.extend(labels_real_life)
+    except Exception as e:
+        print(f"Error loading Real Life Violence Dataset: {e}")
+        # Continue with existing data
 
-    print(f"Total graphs: {len(all_graphs)}")
-    print(f"Positive (violent) samples: {sum(all_labels)}")
-    print(f"Negative (non-violent) samples: {len(all_labels) - sum(all_labels)}")
+    # Split data into train/val/test sets
+    train_graphs, test_graphs, train_labels, test_labels = train_test_split(
+        all_graphs, all_labels, test_size=TEST_SPLIT_RATIO, random_state=RANDOM_SEED
+    )
 
-    # Assign labels to graphs
-    for i, graph in enumerate(all_graphs):
-        graph.y = torch.tensor([all_labels[i]], dtype=torch.float)
-
-    # Split data into train, validation, and test sets
-    train_graphs, test_graphs = train_test_split(
-        all_graphs,
-        test_size=TEST_SPLIT_RATIO,
+    # Further split training data to create a validation set
+    train_graphs, val_graphs, train_labels, val_labels = train_test_split(
+        train_graphs,
+        train_labels,
+        test_size=VALIDATION_SPLIT_RATIO,
         random_state=RANDOM_SEED,
-        stratify=all_labels,
-    )
-    train_graphs, val_graphs = train_test_split(
-        train_graphs, test_size=VALIDATION_SPLIT_RATIO, random_state=RANDOM_SEED
     )
 
-    print(f"Training graphs: {len(train_graphs)}")
-    print(f"Validation graphs: {len(val_graphs)}")
-    print(f"Test graphs: {len(test_graphs)}")
+    # Attach labels to graph objects
+    for i, graph in enumerate(train_graphs):
+        graph.y = torch.tensor([train_labels[i]], dtype=torch.float)
+
+    for i, graph in enumerate(val_graphs):
+        graph.y = torch.tensor([val_labels[i]], dtype=torch.float)
+
+    for i, graph in enumerate(test_graphs):
+        graph.y = torch.tensor([test_labels[i]], dtype=torch.float)
 
     # Create data loaders
-    train_loader = DataLoader(train_graphs, batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_graphs, batch_size=BATCH_SIZE)
-    test_loader = DataLoader(test_graphs, batch_size=BATCH_SIZE)
+    train_loader = DataLoader(
+        train_graphs, batch_size=batch_size, shuffle=True, follow_batch=["x"]
+    )
+    val_loader = DataLoader(val_graphs, batch_size=batch_size, follow_batch=["x"])
+    test_loader = DataLoader(test_graphs, batch_size=batch_size, follow_batch=["x"])
 
-    # Get input channel dimension from data
-    in_channels = train_graphs[0].x.shape[1]
+    # Print dataset statistics
+    print(f"Dataset loaded: {len(all_graphs)} total samples")
+    print(
+        f"Training: {len(train_graphs)}, Validation: {len(val_graphs)}, "
+        f"Test: {len(test_graphs)}"
+    )
 
-    # Initialize model
+    # Create model
+    device = get_device()
+    print(f"Using device: {device}")
+
     model = ViolenceDetectionGNN(
-        in_channels=in_channels,
-        hidden_channels=MODEL_HIDDEN_CHANNELS,
+        in_channels=2,  # x, y coordinates
+        hidden_channels=hidden_channels,
         transformer_heads=MODEL_TRANSFORMER_HEADS,
-        transformer_layers=MODEL_TRANSFORMER_LAYERS,
+        transformer_layers=transformer_layers,
     ).to(device)
 
-    # Initialize optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    # Set up optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     # Train model
     print("Training model...")
     metrics = train_model(
-        model, train_loader, val_loader, device, optimizer, num_epochs=NUM_EPOCHS
+        model, train_loader, val_loader, device, optimizer, num_epochs
     )
 
-    # Evaluate model
-    avg_test_loss, test_auc, optimal_threshold, threshold_metrics = evaluate_model(
+    # Evaluate on test set
+    print("Evaluating model on test set...")
+    auc, accuracy, threshold, threshold_metrics = evaluate_model(
         model, test_loader, device
     )
-    print(f"Test Loss: {avg_test_loss:.4f}")
-    print(f"Test AUC: {test_auc:.4f}")
-    print(f"Optimal classification threshold: {optimal_threshold:.4f}")
-    print("Threshold metrics:")
-    for metric, value in threshold_metrics.items():
-        print(f"  {metric}: {value:.4f}")
 
-    # Save model
-    model_path = Path("violence_detection_model.pt")
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "threshold": optimal_threshold,
-            "metrics": threshold_metrics,
-        },
-        model_path,
-    )
-    print(f"Model saved to {model_path}")
+    print(f"Test AUC: {auc:.4f}")
+    print(f"Test Accuracy: {accuracy:.4f}")
+    print(f"Optimal Threshold: {threshold:.4f}")
+    print(f"Sensitivity: {threshold_metrics['sensitivity']:.4f}")
+    print(f"Specificity: {threshold_metrics['specificity']:.4f}")
+    print(f"F1 Score: {threshold_metrics['f1_score']:.4f}")
 
-    # Create output directory for plots
-    plots_dir = Path("plots")
-    plots_dir.mkdir(exist_ok=True)
-
-    # Create test metrics dictionary for visualization
-    test_metrics = {
-        "loss": avg_test_loss,
-        "auc": test_auc,
-        "f1": threshold_metrics["f1_score"],
-        "threshold": optimal_threshold,
+    # Save model with threshold information
+    model_dict = {
+        "model_state_dict": model.state_dict(),
+        "threshold": threshold,
+        "threshold_metrics": threshold_metrics,
+        "test_auc": auc,
+        "test_accuracy": accuracy,
     }
+    torch.save(model_dict, model_output_path)
+    print(f"Model saved to {model_output_path}")
 
-    # Extract all predictions and targets from test set for visualizations
-    all_preds = []
-    all_targets = []
-    model.eval()
-    with torch.no_grad():
-        for batch in test_loader:
-            batch = batch.to(device)
-            out = model(batch.x, batch.edge_index, batch.batch)
-            all_preds.extend(out.cpu().numpy().flatten())
-            all_targets.extend(batch.y.cpu().numpy().flatten())
-
-    all_preds = np.array(all_preds)
-    all_targets = np.array(all_targets)
-
-    # Generate visualizations
-    viz.plot_training_metrics(
-        metrics, test_metrics, output_path=plots_dir / "training_metrics.png"
-    )
-
-    viz.plot_classification_metrics(
-        all_targets,
-        all_preds,
-        optimal_threshold,
-        output_path=plots_dir / "classification_metrics.png",
-    )
-
-    viz.plot_learning_curve(metrics, output_path=plots_dir / "learning_curve.png")
-
-    # Sample a pose graph for visualization if available
-    if test_graphs:
-        sample_idx = 0
-        sample_graph = test_graphs[sample_idx]
-        keypoints = sample_graph.x.numpy()
-
-        # Extract edges as tuples
-        edge_index = sample_graph.edge_index.numpy()
-        edges = [
-            (edge_index[0, i], edge_index[1, i]) for i in range(edge_index.shape[1])
-        ]
-
-        # Get label
-        is_violent = bool(sample_graph.y.item() > 0.5)
-
-        viz.plot_pose_graph(
-            keypoints,
-            edges,
-            is_violent,
-            output_path=plots_dir / "sample_pose_graph.png",
-        )
-
-    print(f"All visualizations saved to {plots_dir}")
+    # Visualize training metrics
+    viz.plot_training_metrics(metrics, "training_metrics.png")
+    print("Training metrics visualization saved to training_metrics.png")
 
 
 if __name__ == "__main__":

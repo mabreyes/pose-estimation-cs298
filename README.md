@@ -1,4 +1,4 @@
-# 🔍 Violence Detection using Pose Estimation + Graph Neural Networks + Transformers
+# 🔍 Violence Detection using Pose Estimation + Graph Recurrent Neural Networks
 
 ![sample image](docs/img/1.gif)
 
@@ -9,145 +9,92 @@ config:
 ---
 flowchart TD
  subgraph Input["Input"]
-        I["Pose Keypoints (x,y coordinates)"]
+        I["Pose Keypoints Sequence (x,y coordinates over time)"]
         EI["Edge Connectivity"]
         BI["Batch Assignment"]
   end
- subgraph subGraph1["Layer 1: GCN"]
-        GNN_IN["Node Features [num_nodes, in_channels]"]
-        CONV1["GCNConv (in_channels → hidden_channels)"]
-        BN1["BatchNorm1d"]
-        RELU1["ReLU Activation"]
-        DROP1["Dropout (p=0.2)"]
+ subgraph subGraph1["GraphRNNCell"]
+        IG["Input Graph Convolution"]
+        HG["Hidden State Graph Convolution"]
+        UG["Update Gate (GCNConv)"]
+        RG["Reset Gate (GCNConv)"]
+        CG["Candidate Activation (GCNConv)"]
+        LNORM["Layer Normalization"]
   end
- subgraph subGraph2["Layer 2: GAT with Multi-head Attention"]
-        CONV2["GATConv (hidden_channels → hidden_channels/heads)"]
-        BN2["BatchNorm1d"]
-        RELU2["ReLU Activation"]
-        DROP2["Dropout (p=0.2)"]
-        ATTHEAD["4 Attention Heads"]
+ subgraph subGraph2["Forward Direction Processing"]
+        FWD1["GraphRNNCell Layer 1"]
+        FDROP1["Dropout"]
+        FWD2["GraphRNNCell Layer 2"]
   end
- subgraph subGraph3["GIN Internal MLP"]
-        GINL1["Linear Layer (hidden_channels → hidden_channels*2)"]
-        GINBN["BatchNorm1d"]
-        GINRELU["ReLU Activation"]
-        GINL2["Linear Layer (hidden_channels*2 → hidden_channels)"]
+ subgraph subGraph3["Backward Direction Processing (optional)"]
+        BWD1["GraphRNNCell Layer 1"]
+        BDROP1["Dropout"]
+        BWD2["GraphRNNCell Layer 2"]
   end
- subgraph subGraph4["Layer 3: GIN with MLP"]
-        subGraph3
-        CONV3["GINConv"]
-        BN3["BatchNorm1d"]
-        RELU3["ReLU Activation"]
-        RESCONN["Residual Connection from Layer 1"]
+ subgraph subGraph4["Sequence Processing"]
+        T1["Time Step 1"]
+        T2["Time Step 2"]
+        T3["..."]
+        TN["Time Step N"]
   end
- subgraph subGraph5["Multi-level Feature Aggregation"]
-        JK@{ label: "JumpingKnowledge ('cat' mode)" }
+ subgraph subGraph5["Graph-level Pooling"]
+        GMEAN["Global Mean Pooling"]
   end
- subgraph subGraph6["Multi-scale Pooling"]
-        MP["Mean Pool"]
-        MXP["Max Pool"]
-        AP["Add Pool"]
-        AVGP["Average of 3 Pooling Methods"]
-  end
- subgraph PoseGNN["PoseGNN"]
+ subgraph GRNN["Graph Recurrent Neural Network"]
+        CELL["GraphRNNCell Structure"]
         subGraph1
+        BIDIR["Bidirectional Processing"]
         subGraph2
+        subGraph3
+        TEMPORAL["Temporal Processing"]
         subGraph4
+        POOL["Pooling Layer"]
         subGraph5
-        subGraph6
-        PROJ["Linear Projection (output_dim → hidden_channels)"]
-        GNN_OUT["Graph Embeddings [batch_size, hidden_channels]"]
+        EMB["Graph Sequence Embeddings"]
   end
- subgraph subGraph8["Self-Attention Mechanism"]
-        MHA["Multi-head Attention (4 heads)"]
-        ATTNLN["Layer Norm"]
-        ATTNDROP["Dropout"]
-  end
- subgraph subGraph9["Feed Forward Network"]
-        FFN1["Linear (hidden_channels → hidden_channels*4)"]
-        FFNRELU["ReLU Activation"]
-        FFN2["Linear (hidden_channels*4 → hidden_channels)"]
-        FFNLN["Layer Norm"]
-        FFNDROP["Dropout"]
-  end
- subgraph subGraph10["Transformer Layers (x2)"]
-        TRL1["Transformer Encoder Layer 1"]
-        subGraph8
-        subGraph9
-        TRL2["Transformer Encoder Layer 2"]
-  end
- subgraph TransformerEncoder["TransformerEncoder"]
-        TR_IN["Transformer Input [batch_size, hidden_channels]"]
-        UNSQ1["Unsqueeze to [batch_size, 1, hidden_channels]"]
-        POS_EMB["Positional Embedding"]
-        ADD1["Add"]
-        subGraph10
-        SQZ["Squeeze to [batch_size, hidden_channels]"]
-        TR_OUT["Transformer Output [batch_size, hidden_channels]"]
-  end
- subgraph subGraph12["Classification Head"]
-        FC1["Linear Layer (hidden_channels → hidden_channels/2)"]
-        RELU4["ReLU Activation"]
-        DROP3["Dropout (p=0.3)"]
-        FC2["Linear Layer (hidden_channels/2 → 1)"]
+ subgraph subGraph7["Score Regression Network"]
+        SRN1["Linear (hidden_dim*2 → hidden_dim)"]
+        SRNLN["Layer Normalization"]
+        SRNRELU1["ReLU Activation"]
+        SRNDROP["Dropout"]
+        SRN2["Linear (hidden_dim → hidden_dim/2)"]
+        SRNRELU2["ReLU Activation"]
+        SRN3["Linear (hidden_dim/2 → 1)"]
         SIGMOID["Sigmoid Activation"]
-        CL_OUT["Violence Score [batch_size, 1]"]
   end
-    I --> GNN_IN
-    EI --> GNN_IN
-    BI --> GNN_IN
-    GNN_IN --> CONV1
-    CONV1 --> BN1
-    BN1 --> RELU1
-    RELU1 --> DROP1
-    DROP1 --> CONV2 & RESCONN & JK
-    ATTHEAD --> CONV2
-    CONV2 --> BN2
-    BN2 --> RELU2
-    RELU2 --> DROP2
-    DROP2 --> CONV3 & JK
-    RESCONN --> CONV3
-    GINL1 --> GINBN
-    GINBN --> GINRELU
-    GINRELU --> GINL2
-    GINL2 --> CONV3
-    CONV3 --> BN3
-    BN3 --> RELU3
-    RELU3 --> JK
-    JK --> MP & MXP & AP
-    MP --> AVGP
-    MXP --> AVGP
-    AP --> AVGP
-    AVGP --> PROJ
-    PROJ --> GNN_OUT
-    GNN_OUT --> TR_IN
-    TR_IN --> UNSQ1
-    UNSQ1 --> ADD1
-    POS_EMB --> ADD1
-    ADD1 --> TRL1
-    TRL1 --> TRL2
-    TRL2 --> SQZ
-    SQZ --> TR_OUT
-    MHA --> ATTNLN
-    ATTNLN --> ATTNDROP
-    ATTNDROP --> TRL1
-    FFN1 --> FFNRELU
-    FFNRELU --> FFN2
-    FFN2 --> FFNLN
-    FFNLN --> FFNDROP
-    FFNDROP --> TRL1
-    TR_OUT --> FC1
-    FC1 --> RELU4
-    RELU4 --> DROP3
-    DROP3 --> FC2
-    FC2 --> SIGMOID
-    SIGMOID --> CL_OUT
-    JK@{ shape: rect}
+    I --> CELL
+    EI --> CELL
+    BI --> CELL
+    IG --> UG & RG & CG
+    HG --> UG & RG
+    UG --> CELL
+    RG --> CELL
+    CG --> CELL
+    LNORM --> CELL
+    CELL --> FWD1 & BWD1
+    FWD1 --> FDROP1
+    FDROP1 --> FWD2
+    BWD1 --> BDROP1
+    BDROP1 --> BWD2
+    T1 --> T2
+    T2 --> T3
+    T3 --> TN
+    FWD2 & BWD2 --> GMEAN
+    GMEAN --> EMB
+    EMB --> SRN1
+    SRN1 --> SRNLN
+    SRNLN --> SRNRELU1
+    SRNRELU1 --> SRNDROP
+    SRNDROP --> SRN2
+    SRN2 --> SRNRELU2
+    SRNRELU2 --> SRN3
+    SRN3 --> SIGMOID
+    SIGMOID --> SCORE["Violence Score (0-1)"]
 ```
 
 ## 🌟 Overview
 
-This project detects violent behavior in videos by analyzing human pose data using Graph Neural Networks (GNNs). The system converts pose keypoints from MMPose into graph structures, then processes them through a GNN to predict a violence score between 0 and 1.
+This project detects violent behavior in videos by analyzing human pose data using Graph Recurrent Neural Networks (GRNNs). The system converts pose keypoints from MMPose into graph structures, then processes them through a GRNN to predict a violence score between 0 and 1.
 
 ## 📋 Table of Contents
 
@@ -170,7 +117,7 @@ This project detects violent behavior in videos by analyzing human pose data usi
 
 - 📹 Process MMPose JSON files containing human pose estimation data
 - 🔗 Convert pose data into graph structures for deep learning analysis
-- 🧠 Apply Graph Neural Networks to analyze spatial and temporal pose interactions
+- 🧠 Apply Graph Recurrent Neural Networks to analyze spatial and temporal pose interactions
 - 🔢 Predict violence scores on a scale from 0 to 1
 - 📊 Visualize training metrics and model performance
 - 🚀 Hardware acceleration support (CUDA for NVIDIA GPUs, MPS for Apple Silicon)
@@ -204,9 +151,8 @@ The project is organized as follows:
 ```
 violence-detection/
 ├── src/                  # Source code directory
-│   ├── gnn.py            # GNN component and graph creation utilities
-│   ├── model.py          # Main model architecture
-│   ├── transformer.py    # Transformer component for sequential processing
+│   ├── grnn.py           # GRNN component and implementation
+│   ├── model.py          # Main model architecture interface
 │   ├── train.py          # Training script
 │   ├── inference.py      # Inference script
 │   └── visualization.py  # Visualization utilities
@@ -248,7 +194,7 @@ The JSON files should contain pose keypoints in the MMPose format, with skeleton
 The violence detection pipeline consists of three main stages:
 
 1. **🎬 Video Processing**: Extract pose data from videos using a pose estimation system (MMPose)
-2. **🧮 Model Training**: Train a Graph Neural Network on the extracted pose data
+2. **🧮 Model Training**: Train a Graph Recurrent Neural Network on the extracted pose data
 3. **🔮 Inference**: Apply the trained model to new videos to predict violence scores
 
 ### 🔄 Complete Workflow
@@ -376,7 +322,7 @@ The training script:
 
 1. Loads MMPose JSON files from violent and non-violent datasets
 2. Converts pose data to graph representations
-3. Trains a GNN model on the data
+3. Trains a GRNN model on the data
 4. Evaluates performance on validation and test sets
 5. Saves the model to `violence_detection_model.pt`
 6. Generates training metrics visualization in `training_metrics.png`
@@ -430,31 +376,25 @@ The output JSON file will have this structure:
 
 The violence detection model uses a multi-component architecture:
 
-1. **📊 Graph Neural Network (GNN) Component**:
+1. **📊 Graph Recurrent Neural Network (GRNN) Component**:
    - Processes pose keypoints as graph structures
    - Uses Graph Convolutional Network (GCN) layers to analyze spatial relationships
    - Converts raw pose data into meaningful embeddings
 
-2. **🔄 Transformer Component**:
-   - Takes embeddings from the GNN
-   - Applies self-attention to capture contextual relationships
-   - Enhances feature representation through attention mechanisms
-
-3. **🎯 Classification Component**:
-   - Takes transformer outputs and applies fully connected layers
+2. **🎯 Classification Component**:
+   - Takes embeddings from the GRNN
+   - Applies fully connected layers
    - Uses dropout regularization to prevent overfitting
    - Produces final violence score on a scale from 0 to 1
 
-This pipeline architecture (pose keypoints → GNN → Transformer → classification) allows the model to:
+This pipeline architecture (pose keypoints → GRNN → classification) allows the model to:
 
-- 🔗 Analyze the spatial relationships between body parts via the GNN
-- 🕰️ Capture temporal and contextual patterns via the Transformer
+- 🔗 Analyze the spatial relationships between body parts via the GRNN
 - 🎯 Make more robust predictions by combining multiple deep learning techniques
 
 The code is modularly organized into separate files:
 
-- `gnn.py`: Contains the GNN component
-- `transformer.py`: Contains the Transformer component
+- `grnn.py`: Contains the GRNN component
 - `violence_detection_model.py`: Main file that combines all components
 
 ## 📈 Performance
